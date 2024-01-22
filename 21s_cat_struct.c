@@ -1,9 +1,9 @@
 #include <stdio.h>
-#include <getopt.h>
+#include <getopt.h> /*подключение библиотеки для использования функций getopt_long и структуры option*/
 #include <stdlib.h>
 
 
-
+/*создание структуры для флагов*/
 typedef struct {
     int b;
     int e;
@@ -24,18 +24,18 @@ int main(int argc, char* argv[]){
     
     return 0;
 }
-
+/*функция парсинга флагов(включая длиные флаги)*/
 void get_options(int argc, char* argv[], options *opts){
     int opt;
-    static struct option long_options[] = {
-        {'number-nonblank', no_argument, 0, 'b'},
-        {'number', no_argument, 0, 'n'},
-        {'squeeze-blank', no_argument, 0, 's'},
+    static struct option long_options[] = { /*что бы определять длинные и короткие флаги в структуретзначение val устанавливаем значение коротких параметров*/
+        {"number-nonblank", no_argument, 0, 'b'},
+        {"number", no_argument, 0, 'n'},
+        {"squeeze-blank", no_argument, 0, 's'},
         {0, 0, 0, 0}
     }; 
   
-    while(opt = getopt_long(argc, argv, "+bevntTE", long_options) != -1){
-        switch (opt)
+    while((opt = getopt_long(argc, argv, "+bevntTE", long_options, NULL) != -1)){
+        switch (opt) /*обработка результатов работы функции*/
         {
         case 'b':
             opts -> b = 1;
