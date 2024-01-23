@@ -27,7 +27,7 @@ void get_options(int argc, char* argv[], options *opts){
         {0, 0, 0, 0}
     }; 
     int options_index;
-    while((opt = getopt_long(argc, argv, "+bevntTE", long_options, &options_index) != -1)){
+    while((opt = (getopt_long(argc, argv, "+bevntTE", long_options, &options_index))) != -1){
         printf("%d", opt);
         switch (opt) 
         {
@@ -74,7 +74,6 @@ void get_files(int argc, char* argv[], char** files_mass, int* count_index){
 
 int main(int argc, char* argv[]){
     options opts;
-    opts.b = 0;
     int count_index = 0;
     char** file_mass = malloc(10 * sizeof(char*)); // Выделение памяти под 10 указателей на char
     for (int i = 0; i < 10; i++) {
@@ -95,7 +94,9 @@ int main(int argc, char* argv[]){
     free(file_mass);
     printf("%d\n", opts.b);
     printf("%d\n", opts.e);
+    printf("%d\n", opts.v);
     printf("%d\n", opts.n);
+    printf("%d\n", opts.t);
     return 0;
 }
 
