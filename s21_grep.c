@@ -3,16 +3,18 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include <regex.h>
 static const int OPTIONS_END = -1;
-static const int PATTERNS_INIT = 1000;
-static const int PATTERNS_ADD = 1000;
-static const int BUFFER_INIT = 1000;
+static const int PATTERNS_INIT = 128;
+static const int PATTERNS_ADD = 128;
+static const int BUFFER_INIT = 128;
 static const char *FOPEN_READ = "r";
-static const int BUFFER_MULT = 1000;
+static const int BUFFER_MULT = 10;
 
 struct Patterns
 {
     char **data;
+    regex_t *reg_data;
     size_t cur_size;
     size_t max_size;
 };
@@ -31,6 +33,7 @@ struct Options
     bool f;
     bool o;
     struct Patterns patts;
+    size_t file_count;
 };
 typedef struct Options Options;
 static const char SHORTOPTIONS[] = "e:f:isvnholc";
@@ -70,6 +73,7 @@ void *safe_realloc(void *buffer, const size_t size)
     }
     return ret_ptr;
 }
+/*функция добавления шаблонов*/
 static void patterns_add(Patterns *const patts, const char *const patt)
 {
     if (patts->cur_size == patts->max_size)
@@ -80,6 +84,7 @@ static void patterns_add(Patterns *const patts, const char *const patt)
     patts->data[patts->cur_size] = safe_malloc(sizeof(char) * strlen(patt) + sizeof(char));
     strcpy(patts->data[patts->cur_size++], patt);
 }
+/*фкнкция открытия файла*/
 FILE *safe_fopen(const char *filename, const char *mode)
 {
     FILE *file = fopen(filename, mode);
@@ -90,6 +95,7 @@ FILE *safe_fopen(const char *filename, const char *mode)
     }
     return file;
 }
+/*функция создания буфера*/
 static void buffer_file(FILE *file, char *buffer)
 {
     size_t size = 0;
@@ -99,7 +105,7 @@ static void buffer_file(FILE *file, char *buffer)
     {
         buffer[size++] = simbol;
         simbol = fgetc(file);
-        if (size != max_size)
+        if (size == max_size)
         {
             max_size *= BUFFER_MULT;
             buffer = safe_realloc(buffer, max_size * sizeof(char));
@@ -107,9 +113,10 @@ static void buffer_file(FILE *file, char *buffer)
     }
     buffer[size] = '\0';
 }
+/*функция разбора строк на лексемы*/
 static void patterns_add_from_string(Patterns *const patts, const char *const str)
 {
-    char *temp_patts = safe_malloc(sizeof(char) * strlen(str) + sizeof(char));
+    char* temp_patts = safe_malloc((sizeof(char))*(strlen(str)+1));
     strcpy(temp_patts, str);
     char *token = strtok(temp_patts, "\n");
     while (token != NULL)
@@ -119,6 +126,7 @@ static void patterns_add_from_string(Patterns *const patts, const char *const st
     }
     free(temp_patts);
 }
+/*функция разбора файла на лексемы*/
 static void patterns_add_from_file(Patterns *const patts, char *const filename)
 {
     FILE *file = safe_fopen(filename, FOPEN_READ);
@@ -128,7 +136,7 @@ static void patterns_add_from_file(Patterns *const patts, char *const filename)
     free(buffer);
     fclose(file);
 }
-
+/*функция установки флагов и заполнения структур*/
 static void set_options(const char option, Options *options)
 {
     switch (option)
@@ -170,7 +178,15 @@ static void set_options(const char option, Options *options)
         exit(1);
     }
 }
-
+/*функция комплимирования шаблонов в регулярные выражения*/
+static void patterns_compile_to_regex(Options *const opts) {
+  Patterns *patts = &opts->patts;
+  patts->reg_data = safe_malloc(sizeof(regex_t) * patts->cur_size);
+  int reg_icase = opts->i ? REG_ICASE : 0;
+  for (size_t i = 0; i < patts->cur_size; ++i) {
+    regcomp(&patts->reg_data[i], patts->data[i], reg_icase);
+  }
+}
 /*Освобождение структуры patts*/
 static void patterns_free(Patterns *const patts)
 {
@@ -180,12 +196,106 @@ static void patterns_free(Patterns *const patts)
     }
     free(patts->data);
 }
+/*освобождение всех структур*/
 static void options_free(Options *const opts) { patterns_free(&opts->patts); }
+/*иницилизация структуры*/
 static void patterns_init(Patterns *const patts)
 {
     patts->cur_size = 0;
     patts->max_size = PATTERNS_INIT;
     patts->data = safe_malloc(sizeof(char *) * patts->max_size);
+}
+
+static bool is_match(const char *line, const Options *const opts,
+                     regmatch_t *const match) {
+  const Patterns *const patts = &opts->patts;
+  bool result = false;
+  size_t nmatch = match ? 1 : 0;
+  for (size_t i = 0; i < patts->cur_size; ++i) {
+    if (regexec(&patts->reg_data[i], line, nmatch, match, 0) == 0) {
+      result = true;
+    }
+  }
+  if (opts->v) {
+    result = !result;
+    if (opts->o) {
+      result = false;
+    }
+  }
+  return result;
+}
+/**/
+static void grep_match_count(FILE *file, const char *filename,
+                             const Options *const opts) {
+  size_t match_count = 0;
+  char *buffer = safe_malloc(sizeof(char) * BUFFER_INIT);
+  size_t buffer_size = BUFFER_INIT;
+  while (getline(&buffer, &buffer_size, file) != EOF) {
+    if (is_match(buffer, opts, NULL)) {
+      ++match_count;
+    }
+  }
+  if (opts->file_count > 1 && !opts->h) {
+    fprintf(stdout, "%s:", filename);
+  }
+  fprintf(stdout, "%zu\n", match_count);
+  free(buffer);
+}
+
+static void grep_lines_with_matches(FILE *file, const char *filename,
+                                    const Options *const opts) {
+  char *line = safe_malloc(sizeof(char) * BUFFER_INIT);
+  size_t line_size = BUFFER_INIT;
+  size_t line_count = 0;
+  while (getline(&line, &line_size, file) != EOF) {
+    ++line_count;
+    if (is_match(line, opts, NULL)) {
+      if (opts->file_count > 1 && !opts->h) {
+        fprintf(stdout, "%s:", filename);
+      }
+      if (opts->n) {
+        fprintf(stdout, "%zu:", line_count);
+      }
+      fprintf(stdout, "%s", line);
+    }
+  }
+  free(line);
+}
+
+static void grep_only_matching(FILE *file, const char *filename,
+                               const Options *const opts) {
+  char *line = safe_malloc(sizeof(char) * BUFFER_INIT);
+  size_t line_size = BUFFER_INIT;
+  size_t line_count = 0;
+  regmatch_t match = {0};
+  while (getline(&line, &line_size, file) != EOF) {
+    char *line_ptr = line;
+    ++line_count;
+    while (is_match(line_ptr, opts, &match)) {
+      if (opts->file_count > 1 && !opts->h) {
+        fprintf(stdout, "%s:", filename);
+      }
+      if (opts->n) {
+        fprintf(stdout, "%zu:", line_count);
+      }
+      fprintf(stdout, "%.*s\n", (match.rm_eo - match.rm_so),
+              (line_ptr + match.rm_so));
+      line_ptr += match.rm_eo;
+    }
+  }
+  free(line);
+}
+static void grep_files_with_matches(FILE *file, const char *filename,
+                                    const Options *const opts) {
+  char *buffer = safe_malloc(sizeof(char) * BUFFER_INIT);
+  size_t buffer_size = BUFFER_INIT;
+  while (getline(&buffer, &buffer_size, file) != EOF) {
+    if (is_match(buffer, opts, NULL)) {
+      fprintf(stdout, "%s\n", filename);
+      break;
+    }
+  }
+  free(buffer);
 }
 
 void get_options(int argc, char *argv[], Options *opts)
@@ -198,16 +308,54 @@ void get_options(int argc, char *argv[], Options *opts)
         set_options(opt, opts);
         opt = getopt_long(argc, argv, SHORTOPTIONS, LONGOPTIONS, &long_options_index);
     }
+    if (!opts->e && !opts->f){
+        patterns_add_from_string(&opts->patts, argv[optind++]);
+    }
+    patterns_compile_to_regex(opts);
+    opts->file_count = argc - optind;
+}
+static void route_file_greping(FILE *file, const char *filename, const Options *const opts)
+{
+    if (opts->l)
+    {
+        grep_files_with_matches(file, filename, opts);
+    }
+    else if (opts->c)
+    {
+        grep_match_count(file, filename, opts);
+    }
+    else if (opts->o)
+    {
+        grep_only_matching(file, filename, opts);
+    }
+    else{
+        grep_lines_with_matches(file, filename, opts);
+    }
 }
 
+/*опция s*/
+static void process_file(int file_count, char *const file_path[], const Options *const opts)
+{
+    for (FILE *curr_file = NULL; file_count--; ++file_path)
+    {
+        curr_file = fopen(*file_path, FOPEN_READ);
+        if (curr_file != NULL)
+        {
+            route_file_greping(curr_file, *file_path, opts);
+            fflush(stdout);
+            fclose(curr_file);
+        }
+        else if (!opts->s)
+        {
+            fprintf(stderr, "%s: no file directory\n", *file_path);
+        }
+    }
+}
 int main(int argc, char *argv[])
 {
     Options opts = {0};
     get_options(argc, argv, &opts);
-    for (size_t i = 0; i < opts.patts.cur_size; i++)
-    {
-        puts(opts.patts.data[i]);
-    }
+    process_file(argc - optind, argv + optind, &opts);
     options_free(&opts);
     return 0;
 }
