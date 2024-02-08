@@ -38,17 +38,16 @@ struct Options
 typedef struct Options Options;
 static const char SHORTOPTIONS[] = "e:f:isvnholc";
 static struct option LONGOPTIONS[] = {
-    {"regexp", required_argument, NULL, 'e'},
-    {"file", required_argument, NULL, 'f'},
-    {"ignore-case", no_argument, NULL, 'i'},
-    {"no-messages", no_argument, NULL, 's'},
-    {"invert-match", no_argument, NULL, 'v'},
-    {"line-number", no_argument, NULL, 'n'},
-    {"no-filename", no_argument, NULL, 'h'},
-    {"only-matching", no_argument, NULL, 'o'},
-    {"file-witch-matches", no_argument, NULL, 'l'},
-    {"count", no_argument, NULL, 'c'},
-    {"help", no_argument, NULL, 0},
+    {"regexp", required_argument, NULL, 'e'},       // использовать ШАБЛОНЫ для поиска
+    {"file", required_argument, NULL, 'f'},         // брать ШАБЛОНЫ из ФАЙЛа
+    {"ignore-case", no_argument, NULL, 'i'},        // игнорировать различие регистра
+    {"no-messages", no_argument, NULL, 's'},        // не показывать сообщения об ошибках
+    {"invert-match", no_argument, NULL, 'v'},       // выбирать не подходящие строки
+    {"line-number", no_argument, NULL, 'n'},        // печатать номер строки вместе с выходными строками
+    {"no-filename", no_argument, NULL, 'h'},        // не начинать вывод с имени файла
+    {"only-matching", no_argument, NULL, 'o'},      // показывать только совпавшие непустые части строк
+    {"file-witch-matches", no_argument, NULL, 'l'}, // печатать только имена ФАЙЛОВ с выбранными строками
+    {"count", no_argument, NULL, 'c'},              // печатать только количество выбранных строк на ФАЙЛ
     {0, 0, 0, 0}};
 
 /*функция выделения и проверки памяти*/
@@ -116,7 +115,7 @@ static void buffer_file(FILE *file, char *buffer)
 /*функция разбора строк на лексемы*/
 static void patterns_add_from_string(Patterns *const patts, const char *const str)
 {
-    char* temp_patts = safe_malloc((sizeof(char))*(strlen(str)+1));
+    char *temp_patts = safe_malloc((sizeof(char)) * (strlen(str) + 1));
     strcpy(temp_patts, str);
     char *token = strtok(temp_patts, "\n");
     while (token != NULL)
@@ -179,13 +178,15 @@ static void set_options(const char option, Options *options)
     }
 }
 /*функция комплимирования шаблонов в регулярные выражения*/
-static void patterns_compile_to_regex(Options *const opts) {
-  Patterns *patts = &opts->patts;
-  patts->reg_data = safe_malloc(sizeof(regex_t) * patts->cur_size);
-  int reg_icase = opts->i ? REG_ICASE : 0;
-  for (size_t i = 0; i < patts->cur_size; ++i) {
-    regcomp(&patts->reg_data[i], patts->data[i], reg_icase);
-  }
+static void patterns_compile_to_regex(Options *const opts)
+{
+    Patterns *patts = &opts->patts;
+    patts->reg_data = safe_malloc(sizeof(regex_t) * patts->cur_size);
+    int reg_icase = opts->i ? REG_ICASE : 0;
+    for (size_t i = 0; i < patts->cur_size; ++i)
+    {
+        regcomp(&patts->reg_data[i], patts->data[i], reg_icase);
+    }
 }
 /*Освобождение структуры patts*/
 static void patterns_free(Patterns *const patts)
@@ -205,99 +206,122 @@ static void patterns_init(Patterns *const patts)
     patts->max_size = PATTERNS_INIT;
     patts->data = safe_malloc(sizeof(char *) * patts->max_size);
 }
-
+/*проверка соответствия строки шаблону*/
 static bool is_match(const char *line, const Options *const opts,
-                     regmatch_t *const match) {
-  const Patterns *const patts = &opts->patts;
-  bool result = false;
-  size_t nmatch = match ? 1 : 0;
-  for (size_t i = 0; i < patts->cur_size; ++i) {
-    if (regexec(&patts->reg_data[i], line, nmatch, match, 0) == 0) {
-      result = true;
+                     regmatch_t *const match)
+{
+    const Patterns *const patts = &opts->patts;
+    bool result = false;
+    size_t nmatch = match ? 1 : 0;
+    for (size_t i = 0; i < patts->cur_size; ++i)
+    {
+        if (regexec(&patts->reg_data[i], line, nmatch, match, 0) == 0)
+        {
+            result = true;
+        }
     }
-  }
-  if (opts->v) {
-    result = !result;
-    if (opts->o) {
-      result = false;
+    if (opts->v)
+    {
+        result = !result;
+        if (opts->o)
+        {
+            result = false;
+        }
     }
-  }
-  return result;
+    return result;
 }
-/**/
+/*функция вывода количества совпадений или одного совпадения с выводом*/
 static void grep_match_count(FILE *file, const char *filename,
-                             const Options *const opts) {
-  size_t match_count = 0;
-  char *buffer = safe_malloc(sizeof(char) * BUFFER_INIT);
-  size_t buffer_size = BUFFER_INIT;
-  while (getline(&buffer, &buffer_size, file) != EOF) {
-    if (is_match(buffer, opts, NULL)) {
-      ++match_count;
+                             const Options *const opts)
+{
+    size_t match_count = 0;
+    char *buffer = safe_malloc(sizeof(char) * BUFFER_INIT);
+    size_t buffer_size = BUFFER_INIT;
+    while (getline(&buffer, &buffer_size, file) != EOF)
+    {
+        if (is_match(buffer, opts, NULL))
+        {
+            ++match_count;
+        }
     }
-  }
-  if (opts->file_count > 1 && !opts->h) {
-    fprintf(stdout, "%s:", filename);
-  }
-  fprintf(stdout, "%zu\n", match_count);
-  free(buffer);
+    if (opts->file_count > 1 && !opts->h)
+    {
+        fprintf(stdout, "%s:", filename);
+    }
+    fprintf(stdout, "%zu\n", match_count);
+    free(buffer);
 }
 
 static void grep_lines_with_matches(FILE *file, const char *filename,
-                                    const Options *const opts) {
-  char *line = safe_malloc(sizeof(char) * BUFFER_INIT);
-  size_t line_size = BUFFER_INIT;
-  size_t line_count = 0;
-  while (getline(&line, &line_size, file) != EOF) {
-    ++line_count;
-    if (is_match(line, opts, NULL)) {
-      if (opts->file_count > 1 && !opts->h) {
-        fprintf(stdout, "%s:", filename);
-      }
-      if (opts->n) {
-        fprintf(stdout, "%zu:", line_count);
-      }
-      fprintf(stdout, "%s", line);
+                                    const Options *const opts)
+{
+    char *line = safe_malloc(sizeof(char) * BUFFER_INIT);
+    size_t line_size = BUFFER_INIT;
+    size_t line_count = 0;
+    while (getline(&line, &line_size, file) != EOF)
+    {
+        ++line_count;
+        if (is_match(line, opts, NULL))
+        {
+            if (opts->file_count > 1 && !opts->h)
+            {
+                fprintf(stdout, "%s:", filename);
+            }
+            if (opts->n)
+            {
+                fprintf(stdout, "%zu:", line_count);
+            }
+            fprintf(stdout, "%s", line);
+        }
     }
-  }
-  free(line);
+    free(line);
 }
-
+/*выводит имена файлов с найдеными совпадениями работает с флагами -h и -n*/
 static void grep_only_matching(FILE *file, const char *filename,
-                               const Options *const opts) {
-  char *line = safe_malloc(sizeof(char) * BUFFER_INIT);
-  size_t line_size = BUFFER_INIT;
-  size_t line_count = 0;
-  regmatch_t match = {0};
-  while (getline(&line, &line_size, file) != EOF) {
-    char *line_ptr = line;
-    ++line_count;
-    while (is_match(line_ptr, opts, &match)) {
-      if (opts->file_count > 1 && !opts->h) {
-        fprintf(stdout, "%s:", filename);
-      }
-      if (opts->n) {
-        fprintf(stdout, "%zu:", line_count);
-      }
-      fprintf(stdout, "%.*s\n", (match.rm_eo - match.rm_so),
-              (line_ptr + match.rm_so));
-      line_ptr += match.rm_eo;
+                               const Options *const opts)
+{
+    char *line = safe_malloc(sizeof(char) * BUFFER_INIT);
+    size_t line_size = BUFFER_INIT;
+    size_t line_count = 0;
+    regmatch_t match = {0};
+    while (getline(&line, &line_size, file) != EOF)
+    {
+        char *line_ptr = line;
+        ++line_count;
+        while (is_match(line_ptr, opts, &match))
+        {
+            if (opts->file_count > 1 && !opts->h)
+            {
+                fprintf(stdout, "%s:", filename);
+            }
+            if (opts->n)
+            {
+                fprintf(stdout, "%zu:", line_count);
+            }
+            fprintf(stdout, "%.*s\n", (match.rm_eo - match.rm_so),
+                    (line_ptr + match.rm_so));
+            line_ptr += match.rm_eo;
+        }
     }
-  }
-  free(line);
+    free(line);
 }
+/*выводит имена файлов, в которых найдено совпадение с заданным шаблоном регулярного выражения*/
 static void grep_files_with_matches(FILE *file, const char *filename,
-                                    const Options *const opts) {
-  char *buffer = safe_malloc(sizeof(char) * BUFFER_INIT);
-  size_t buffer_size = BUFFER_INIT;
-  while (getline(&buffer, &buffer_size, file) != EOF) {
-    if (is_match(buffer, opts, NULL)) {
-      fprintf(stdout, "%s\n", filename);
-      break;
+                                    const Options *const opts)
+{
+    char *buffer = safe_malloc(sizeof(char) * BUFFER_INIT);
+    size_t buffer_size = BUFFER_INIT;
+    while (getline(&buffer, &buffer_size, file) != EOF)
+    {
+        if (is_match(buffer, opts, NULL))
+        {
+            fprintf(stdout, "%s\n", filename);
+            break;
+        }
     }
-  }
-  free(buffer);
+    free(buffer);
 }
-
+/*разбор командной строки и установка флагов*/
 void get_options(int argc, char *argv[], Options *opts)
 {
     patterns_init(&opts->patts);
@@ -308,7 +332,8 @@ void get_options(int argc, char *argv[], Options *opts)
         set_options(opt, opts);
         opt = getopt_long(argc, argv, SHORTOPTIONS, LONGOPTIONS, &long_options_index);
     }
-    if (!opts->e && !opts->f){
+    if (!opts->e && !opts->f)
+    {
         patterns_add_from_string(&opts->patts, argv[optind++]);
     }
     patterns_compile_to_regex(opts);
@@ -328,7 +353,8 @@ static void route_file_greping(FILE *file, const char *filename, const Options *
     {
         grep_only_matching(file, filename, opts);
     }
-    else{
+    else
+    {
         grep_lines_with_matches(file, filename, opts);
     }
 }
